@@ -4,6 +4,11 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
+# User defined class for error exception
+class InvalidDiminsionError(Exception):
+    pass
+
+
 # Function to read data frames from csv files.
 def read_files(filename_train, filename_test):
     """
@@ -64,62 +69,6 @@ def find_variability(df_train, target, category_variable_name):
 
     variability = (counts * (ratios[val] - target_prob_train)**2).sum()
     return variability/df_train.shape[0]
-
-
-# Given a category variable, returns a series containing the labels
-# (0, 1, 2,..) for each value.
-# Labels are found binning the target probability of each value in the train
-# set.
-def find_binning_info(df_train, target, \
-                      category_variable_name, binsize=0.1):
-    """
-    input:
-        df_train: data frame for the train set
-        target : series for the target (assumed to have 0 or 1 only)
-        category_variable_name: name of the category variable
-        bin_size: size of each bin (assumed to be uniform)
-    output:
-        bin info (series): contains the bin label (int) for each value
-    """
-    df = pd.concat([df_train[variable_name], target], axis=1)
-    target_prob_train = target.mean()
-    ratios = df.groupby(variable_name)[target.name].mean()
-    ratio_min = ratios.min()
-    max_num_bins = int(1.0/binsize + 1) # the maximum possible number of bins.
-    for i in range(-max_num_bins, max_num_bins+1):
-        pos = target_prob_train + i*binsize + binsize/2.0
-        if pos > ratio_min:
-            if pos < 1.0 + binsize:
-                bin_min = pos - binsize
-            else:
-                return None # when binsize is not set correctly.
-            break
-
-    # bin names are integers
-    return pd.Series(pd.cut(ratios, bins=np.arange(bin_min, 1.0 + binsize,\
-                    binsize), labels=False), index=ratios.index)
-
-
-# Find a new column based on conversion information found above
-def find_new_variable(column, conversion, unique_values):
-    """
-    Generate a new variable based on conversion table
-    input:
-        column (series): a column of a data frame (category)
-        conversion (series): conversion table stored as a series.
-        unique_values (set): unique values of the given variable.
-                            (It can be obtained from conversion table too.)
-    output:
-        column (series): new column constructed.
-    """
-    # New column
-    col = column.copy()
-    for i, v in col.iteritems():
-        if v in unique_values: # unique_values: unique values from the train set.
-            col[i] = conversion[v]
-        else:
-            col[i] = conversion['null']
-    return col
 
 
 # Replace extreme probabilities (0 and 1) with values that can be treated.
@@ -239,3 +188,147 @@ def plot_variability(df_train, target, \
             plt.axvline(x=pos, color='g', ls='dotted')
     plt.show()
     return
+
+
+# Find the dimensions of train and test sets.
+def find_dimensions(df_train, target, df_test):
+    """
+    input:
+        df_train (dataframe): data frame for the train set (ID as an index)
+        target (series): response variable for the train set (value: 0 or 1)
+        df_test (dataframe): data frame for the test set (ID as an index)
+    output:
+        num_data_train
+        num_data_test
+        num_variables_given
+    """
+    # find dimensions for train & test sets
+    num_data_train = df_train.shape[0]
+    num_data_test = df_test.shape[0]
+    # ID is an index, and target is separate.
+    num_variables_given = df_train.shape[1]
+
+    # Check the validity of data sets based on dimensions.
+    if df_test.shape[1] != num_variables_given or num_data_train != len(target):
+        raise InvalidDimensionError
+    return num_data_train, num_data_test, num_variables_given
+
+
+# Find information for category variables
+def find_category_variables(df_train):
+    """
+    input:
+        df_train
+    output:
+        category_variables (list of column indices)
+        numerical_variables (list of column indices)
+        unique_values (dict of sets)
+    """
+    # indices of category variables by looking at types (23 out of 131)
+    # Assuming non-category (numerical) variables are in 'float64'
+    category_variables = []
+    for i in range(df_train.shape[1]):
+        if df_train.iloc[:,i].dtype != 'float64':
+            category_variables.append(i)
+
+    # The rest of variables are numerical variables.
+    numerical_variables = \
+        [i for i in range(num_variables_given) if i not in category_variables]
+
+    # Find unique values for category variables in the train set.
+    unique_values = {}
+    for ind in category_variables:
+        unique_values[ind] = set(df_train.iloc[:,ind].unique())
+
+    return category_variables, numerical_variables, unique_values
+
+
+# Given a category variable, returns a series containing the labels
+# (0, 1, 2,..) for each value.
+# Labels are found binning the target probability of each value in the train
+# set.
+def find_binning_info(df_train, target, \
+                      category_variable_name, num_bins=10):
+    """
+    input:
+        df_train: data frame for the train set
+        target : series for the target (assumed to have 0 or 1 only)
+        category_variable_name: name of the category variable
+        num_bins: number of bins (default: 10)
+    output:
+        bin info (series): contains the bin label (int) for each value
+    """
+    df = pd.concat([df_train[variable_name], target], axis=1)
+    target_prob_train = target.mean()
+    ratios = df.groupby(variable_name)[target.name].mean()
+    ratio_min = ratios.min()
+    binsize = (ratios.max() - ratios_min)/float(num_bins)
+    for i in range(-num_bins, num_bins+1):
+        pos = target_prob_train + i*binsize + binsize/2.0
+        if pos > ratio_min:
+            if pos < 1.0 + binsize:
+                bin_min = pos - binsize
+            else:
+                return None # when binsize is not set correctly.
+            break
+
+    # bin names are integers
+    return pd.Series(pd.cut(ratios, bins=np.arange(bin_min, 1.0 + binsize,\
+                    binsize), labels=False), index=ratios.index)
+
+
+# Find a new column based on conversion information found above
+def find_new_variable(column, conversion, unique_values):
+    """
+    Generate a new variable based on conversion table
+    input:
+        column (series): a column of a data frame (category)
+        conversion (series): conversion table stored as a series.
+        unique_values (set): unique values of the given variable.
+                            (It can be obtained from conversion table too.)
+    output:
+        column (series): new column constructed.
+    """
+    # New column
+    col = column.copy()
+    for i, v in col.iteritems():
+        if v in unique_values: # unique_values: unique values from the train set.
+            col[i] = conversion[v]
+        else:
+            col[i] = conversion['null']
+    return col
+
+
+# Function to add new variables for category variables with too many values.
+def add_variables_by_binning(variables_binned, num_bins, df_train, target, \
+                             df_test, column_names, unique_values):
+    """
+    input:
+        variables_binned: list of column indices for category variables
+        num_bins: number of bins to be made
+        df_train (data frame): train set
+        target (series): target
+        df_test (data frame): test set
+        column_names: list of column names for train and test sets
+        unique_values: dict of sets of unique values (key: column index)
+    output:
+        none
+    """
+    size_binned = len(variables_binned)
+    # dict will be elements of this list and each dict contains conversion info.
+    conversion_methods = []
+    for ind in variables_binned:
+        conversion_methods.append(find_binning_info(df_train, target, \
+                                column_names[ind], num_bins))
+
+    for i, ind in enumerate(variables_binned):
+        df_train[column_names[ind] + 'a'] = \
+            find_new_variable(df_train[column_names[ind]], \
+                              conversion_methods[i], unique_values[ind])
+        df_test[column_names[ind] + 'a'] = \
+            find_new_variable(df_test[column_names[ind]], \
+                              conversion_methods[i], unique_values[ind])
+        column_names.append(column_names[ind] + 'a')
+    print "Feature engineering:", size_binned, \
+        "category variables are converted to", size_binned, \
+        "new features with less categories"

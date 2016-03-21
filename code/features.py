@@ -1,164 +1,152 @@
+# Functions for feature selections and feature engineering.
 
-# find dimensions for train & test sets
-num_rows_train = df_train.shape[0]
-num_variables = df_train.shape[1] # ID is an index, and target is separate.
-num_rows_test = df_test.shape[0]
+import pandas as pd
+import numpy as np
 
-# Saving null locations.
-df_train_isnull = df_train.isnull()
-df_test_isnull = df_test.isnull()
+from utilities import add_variables_by_binning
+from utilities import find_dimensions, find_category_variables
 
-# column names
-column_names = df_test.columns
+# Function to get features from data frames (feature selections and engineering)
+def get_features1(df_train, target, df_test):
+    """
+    input:
+        df_train (dataframe): data frame for the train set (ID as an index)
+        target (series): response variable for the train set (value: 0 or 1)
+        df_test (dataframe): data frame for the test set (ID as an index)
+    output:
+        X (list of numpy 2D arrays): list of data points for the train set.
+        y (list of numpy 1D arrays): list of target values for the train set.
+        X_test (list of numpy 2D arrays): list of data points for the test set.
+        indices: list of lists of IDs (representing different sets)
+    """
+    # Find dimensions
+    num_data_train, num_data_test, num_variables_given = \
+        find_dimensions(df_train, target, df_test)
 
-# The ratio of target value 1
-target_prob_train = target_train.mean()
+    # Saving null locations for given data (both train and test sets)
+    df_train_isnull = df_train.isnull()
+    df_test_isnull = df_test.isnull()
 
-# indices of category variables by looking at the data (23 out of 131)
-category_variables = [2, 21, 23, 29, 30, 37, 46, 51, 55, 61,
-                      65, 70, 71, 73, 74, 78, 90, 106, 109, 111,
-                      112, 124, 128]
+    # column names as a list
+    column_names = list(df_test.columns)
 
-# The rest of variables are numerical variables.
-numerical_variables = \
-    [i for i in range(num_variables) if i not in category_variables]
+    # The ratio of target value 1
+    target_prob_train = target.mean()
 
-# Find unique values for cateegory variables in the train set.
-unique_values = {}
-for ind in category_variables:
-    unique_values[ind] = set(df_train.iloc[:,ind].unique())
+    # Find category variables and related information
+    category_variables, numerical_variables, unique_values = \
+        find_category_variables(df_train)
 
-# From here on, missing values of category variables will be replaced
-# with a string 'null', which means that missing values will be treated
-# as another category.
-df_train.iloc[:, category_variables] = \
-    df_train.iloc[:, category_variables].replace(np.nan, 'null')
-df_test.iloc[:, category_variables] = \
-    df_test.iloc[:, category_variables].replace(np.nan, 'null')
-print "Replaced nulls with 'null' for category variables"
+    # From here on, missing values of category variables will be replaced
+    # with a string 'null', which means that missing values will be treated
+    # as another category.
+    null_str='null'
+    df_train.iloc[:, category_variables] = \
+        df_train.iloc[:, category_variables].replace(np.nan, null_str)
+    df_test.iloc[:, category_variables] = \
+        df_test.iloc[:, category_variables].replace(np.nan, null_str)
+    #print "Replaced nulls with 'null' for category variables"
 
-variables_binned = [21, 55, 112]
-# dict will be elements of this list and each dict contains conversion info.
-conversion_methods = []
-conversion_methods.append(find_binning_info(df_train, target_train, \
-                        column_names[variables_binned[0]], binsize=0.1))
-conversion_methods.append(find_binning_info(df_train, target_train, \
-                        column_names[variables_binned[1]], binsize=0.05))
-conversion_methods.append(find_binning_info(df_train, target_train, \
-                        column_names[variables_binned[2]], binsize=0.05))
+    # add new variables for category variables with too many values.
+    variables_binned = [21, 55, 112]
+    add_variables_by_binning(variables_binned, num_bins, df_train, target, \
+                             df_test, column_names, unique_values)
 
-print len(conversion_methods[0])
-print 'XDX' in unique_values[21]
-
-new_names = []
-for i, ind in enumerate(variables_binned):
-    df_train[column_names[ind] + 'a'] = \
-        find_new_variable(df_train[column_names[ind]], \
-                          conversion_methods[i], unique_values[ind])
-    df_test[column_names[ind] + 'a'] = \
-        find_new_variable(df_test[column_names[ind]], \
-                          conversion_methods[i], unique_values[ind])
-    new_names.append(column_names[ind] + 'a')
-column_names = np.append(column_names, new_names)
-print "Feature engineering: 3 category variables are converted to",\
-    "3 new features with less categories"
+    # Define 10 category variables that will be considered (from EDA)
+    category_variables_top10 = [131, 132, 78, 30, 133, 46, 109, 128, 65, 61]
+    # v22, v56, v113 are replaced by new variables
+    # (v22a (131), v56a (132), v113a (133))
 
 
-# Define 10 category variables that will be considered
-category_variables_top10 = [131, 132, 78, 30, 133, 46, 109, 128, 65, 61]
-# v22, v56, v113 are replaced by new variables
-# (v22a (131), v56a (132), v113a (133))
+    # The percentage of cells with nulls (only looking at numerical variables)
+    num_nulls_by_row_train = df_train_isnull[numerical_variables].sum(axis=1)
+    num_nulls_by_column_train = df_train_isnull[numerical_variables].sum(axis=0)
+
+    num_nulls_by_row_test = df_test_isnull[numerical_variables].sum(axis=1)
+    num_nulls_by_column_test = df_test_isnull[numerical_variables].sum(axis=0)
+
+    # First, we will select rows with more than 80 nulls.
+    mask_null_over_80_train = (num_nulls_by_row_train > 80)
+    mask_null_over_80_test = (num_nulls_by_row_test > 80)
+
+    # Find above 8 variables (they are the same for both train and test sets)
+    variables_less_null = np.array(numerical_variables)\
+                       [np.where(num_nulls_by_column_train < 0.01 * num_data_train)]
+
+    # Set with less than 80 nulls (mostly 0 null)
+    df_train1 = df_train[~mask_null_over_80_train].copy()
+    df_test1 = df_test[~mask_null_over_80_test].copy()
+    # Set with more than 80 nulls (mostly 100 nulls)
+    df_train2 = df_train[mask_null_over_80_train].copy()
+    df_test2 = df_test[mask_null_over_80_test].copy()
+
+    # We will replace nulls with the mean value of that column
+    df_test1_imputed = df_test1.copy()
+    df_test1_imputed.fillna(df_test1.mean(), inplace=True)
+    df_test2_imputed = df_test2.copy()
+    # Here only impute some columns including 8 variables we need.
+    # (Some columns have all nulls and no mean value.)
+    df_test2_imputed.fillna(df_test2.mean(), inplace=True)
+    print "Divided data into two sets"
+
+    # To see the feature importance, we will drop rows with null values
+    # in the numerical variables in the set 1.
+    # To do that, we fill 'null' in the missing values of category variables first
+    # (which is done already).
+    df_train1_dropped_na = df_train1.dropna()
+
+    # For simplicity, we will only consider significant
+    # (and comparably treatable) category variables.
+    df1 = pd.concat([df_train1_dropped_na, df_test1_imputed])
+    df1_temp = df1[numerical_variables] # Initially it has only numerical variables
+    for ind in category_variables_top10:
+        df_dummy = pd.get_dummies(df1[column_names[ind]], prefix=column_names[ind])
+        #print column_names[ind], df_dummy.shape, df_dummy.isnull().sum().sum()
+        df_dummy.drop(df_dummy.columns[:1], axis=1, inplace=True)
+        df1_temp = pd.concat([df1_temp, df_dummy], axis=1)
+
+    # Create X12, X1_test, y1 for analysis
+    X1 = df1_temp.iloc[:df_train1_dropped_na.shape[0],:].values
+    X1_test = df1_temp.iloc[df_train1_dropped_na.shape[0]:,:].values
+    y1 = np.array(target.loc[df_train1_dropped_na.index])
+
+    # Using the random forest to find the feature importances
+    # for numerical variables + 7 category variables.
+    rf1 = RandomForestClassifier(n_estimators=100, oob_score=True)
+    rf1 = rf1.fit(X1, y1)
 
 
-# The percentage of cells with nulls (only looking at numerical variables)
-num_nulls_by_row_train = df_train_isnull[numerical_variables].sum(axis=1)
-num_nulls_by_column_train = df_train_isnull[numerical_variables].sum(axis=0)
+    # Find the sorted important variables and their importances, and look at top 10.
+    indices_important_variables12 = np.argsort(rf12.feature_importances_)[::-1]
+    important_variable_names12 = df1_temp.columns[indices_important_variables12]
+    importances12 = rf12.feature_importances_[indices_important_variables12]
 
-num_nulls_by_row_test = df_test_isnull[numerical_variables].sum(axis=1)
-num_nulls_by_column_test = df_test_isnull[numerical_variables].sum(axis=0)
+    print "For set1: OOB score:", rf1.oob_score_
 
-# First, we will select rows with more than 80 nulls.
-mask_null_over_80_train = (num_nulls_by_row_train > 80)
-mask_null_over_80_test = (num_nulls_by_row_test > 80)
-
-# Find above 8 variables (they are the same for both train and test sets)
-variables_less_null = np.array(numerical_variables)\
-                   [np.where(num_nulls_by_column_train < 0.01 * num_rows_train)]
-
-# Set with less than 80 nulls (mostly 0 null)
-df_train1 = df_train[~mask_null_over_80_train].copy()
-df_test1 = df_test[~mask_null_over_80_test].copy()
-# Set with more than 80 nulls (mostly 100 nulls)
-df_train2 = df_train[mask_null_over_80_train].copy()
-df_test2 = df_test[mask_null_over_80_test].copy()
-
-# We will replace nulls with the mean value of that column
-df_test1_imputed = df_test1.copy()
-df_test1_imputed.fillna(df_test1.mean(), inplace=True)
-df_test2_imputed = df_test2.copy()
-# Here only impute some columns including 8 variables we need.
-# (Some columns have all nulls and no mean value.)
-df_test2_imputed.fillna(df_test2.mean(), inplace=True)
-print "Divided data into two sets"
-
-# To see the feature importance, we will drop rows with null values
-# in the numerical variables in the set 1.
-# To do that, we fill 'null' in the missing values of category variables first
-# (which is done already).
-df_train1_dropped_na = df_train1.dropna()
-
-# For simplicity, we will only consider significant
-# (and comparably treatable) category variables.
-df1 = pd.concat([df_train1_dropped_na, df_test1_imputed])
-df1_temp = df1[numerical_variables] # Initially it has only numerical variables
-for ind in category_variables_top10:
-    df_dummy = pd.get_dummies(df1[column_names[ind]], prefix=column_names[ind])
-    #print column_names[ind], df_dummy.shape, df_dummy.isnull().sum().sum()
-    df_dummy.drop(df_dummy.columns[:1], axis=1, inplace=True)
-    df1_temp = pd.concat([df1_temp, df_dummy], axis=1)
-
-# Create X12, X1_test, y1 for analysis
-X1 = df1_temp.iloc[:df_train1_dropped_na.shape[0],:].values
-X1_test = df1_temp.iloc[df_train1_dropped_na.shape[0]:,:].values
-y1 = np.array(target_train.loc[df_train1_dropped_na.index])
-
-# Using the random forest to find the feature importances
-# for numerical variables + 7 category variables.
-rf1 = RandomForestClassifier(n_estimators=100, oob_score=True)
-rf1 = rf1.fit(X1, y1)
+    # Trying to predict the test set (only the first set with less nulls).
+    y1_test_prob = rf1.predict_proba(X1_test)[:,1]
+    y1_test_prob = pd.DataFrame(y1_test_prob, index=df_test1.index, \
+                                columns=['PredictedProb'])
 
 
-# Find the sorted important variables and their importances, and look at top 10.
-indices_important_variables12 = np.argsort(rf12.feature_importances_)[::-1]
-important_variable_names12 = df1_temp.columns[indices_important_variables12]
-importances12 = rf12.feature_importances_[indices_important_variables12]
+    df_train2_dropped_na = \
+        df_train2[list(variables_less_null) + category_variables_top10].dropna()
 
-print "For set1: OOB score:", rf1.oob_score_
+    # Creating dummy variables. reset_index should be used because ID orders
+    # have to be preserved
+    df2 = pd.concat([df_train2_dropped_na.reset_index(), \
+                     df_test2_imputed[list(variables_less_null) + \
+                                      category_variables_top10].reset_index()])
+    df2_temp = df2[['ID'] + [column_names[ind] for ind in variables_less_null]]
+    for ind in category_variables_top10:
+        df_dummy = pd.get_dummies(df2[column_names[ind]], prefix=column_names[ind])
+        df_dummy.drop(df_dummy.columns[:1], axis=1, inplace=True)
+        df2_temp = pd.concat([df2_temp, df_dummy], axis=1)
 
-# Trying to predict the test set (only the first set with less nulls).
-y1_test_prob = rf1.predict_proba(X1_test)[:,1]
-y1_test_prob = pd.DataFrame(y1_test_prob, index=df_test1.index, \
-                            columns=['PredictedProb'])
+    # Create X2, X2_test, y2 for analysis
+    X2 = df2_temp.iloc[:df_train2_dropped_na.shape[0],1:].values
+    X2_test = df2_temp.iloc[df_train2_dropped_na.shape[0]:,1:].values
+    y2 = np.array(target.loc[df_train2_dropped_na.index])
 
-
-df_train2_dropped_na = \
-    df_train2[list(variables_less_null) + category_variables_top10].dropna()
-
-# Creating dummy variables. reset_index should be used because ID orders
-# have to be preserved
-df2 = pd.concat([df_train2_dropped_na.reset_index(), \
-                 df_test2_imputed[list(variables_less_null) + \
-                                  category_variables_top10].reset_index()])
-df2_temp = df2[['ID'] + list(column_names[variables_less_null])]
-for ind in category_variables_top10:
-    df_dummy = pd.get_dummies(df2[column_names[ind]], prefix=column_names[ind])
-    df_dummy.drop(df_dummy.columns[:1], axis=1, inplace=True)
-    df2_temp = pd.concat([df2_temp, df_dummy], axis=1)
-
-# Create X2, X2_test, y2 for analysis
-X2 = df2_temp.iloc[:df_train2_dropped_na.shape[0],1:].values
-X2_test = df2_temp.iloc[df_train2_dropped_na.shape[0]:,1:].values
-y2 = np.array(target_train.loc[df_train2_dropped_na.index])
-
-rf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
-rf2 = rf2.fit(X2, y2)
+    rf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
+    rf2 = rf2.fit(X2, y2)
