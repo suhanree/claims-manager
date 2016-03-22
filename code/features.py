@@ -7,11 +7,13 @@ from utilities import add_variables_by_binning
 from utilities import find_dimensions, find_category_variables
 
 # Function to get features from data frames (feature selections and engineering)
+# Here we assume that we will divide data points into several sets,
+# which was determined by patterns of missing values.
 def get_features1(df_train, target, df_test):
     """
     input:
         df_train (dataframe): data frame for the train set (ID as an index)
-        target (series): response variable for the train set (value: 0 or 1)
+        target (series): target variable for the train set with value: 0 or 1
         df_test (dataframe): data frame for the test set (ID as an index)
     output:
         X (list of numpy 2D arrays): list of data points for the train set.
@@ -30,9 +32,6 @@ def get_features1(df_train, target, df_test):
     # column names as a list
     column_names = list(df_test.columns)
 
-    # The ratio of target value 1
-    target_prob_train = target.mean()
-
     # Find category variables and related information
     category_variables, numerical_variables, unique_values = \
         find_category_variables(df_train)
@@ -49,29 +48,29 @@ def get_features1(df_train, target, df_test):
 
     # add new variables for category variables with too many values.
     variables_binned = [21, 55, 112]
+    num_bins = 10 # number of bins for each variable
     add_variables_by_binning(variables_binned, num_bins, df_train, target, \
                              df_test, column_names, unique_values)
 
+    # Choosing category variables.
     # Define 10 category variables that will be considered (from EDA)
     category_variables_top10 = [131, 132, 78, 30, 133, 46, 109, 128, 65, 61]
     # v22, v56, v113 are replaced by new variables
-    # (v22a (131), v56a (132), v113a (133))
+    # v22->v22a (131), v56->v56a (132), v113->v113a (133)
 
-
-    # The percentage of cells with nulls (only looking at numerical variables)
+    # =========================================================================
+    # Choosing 2 sets of data points based on the number of nulls for each row
+    # =========================================================================
+    # The numbers of cells with nulls (only looking at numerical variables)
     num_nulls_by_row_train = df_train_isnull[numerical_variables].sum(axis=1)
     num_nulls_by_column_train = df_train_isnull[numerical_variables].sum(axis=0)
 
     num_nulls_by_row_test = df_test_isnull[numerical_variables].sum(axis=1)
-    num_nulls_by_column_test = df_test_isnull[numerical_variables].sum(axis=0)
+    #num_nulls_by_column_test = df_test_isnull[numerical_variables].sum(axis=0)
 
     # First, we will select rows with more than 80 nulls.
     mask_null_over_80_train = (num_nulls_by_row_train > 80)
     mask_null_over_80_test = (num_nulls_by_row_test > 80)
-
-    # Find above 8 variables (they are the same for both train and test sets)
-    variables_less_null = np.array(numerical_variables)\
-                       [np.where(num_nulls_by_column_train < 0.01 * num_data_train)]
 
     # Set with less than 80 nulls (mostly 0 null)
     df_train1 = df_train[~mask_null_over_80_train].copy()
@@ -80,6 +79,9 @@ def get_features1(df_train, target, df_test):
     df_train2 = df_train[mask_null_over_80_train].copy()
     df_test2 = df_test[mask_null_over_80_test].copy()
 
+    # =========================================================================
+    # Imputation
+    # =========================================================================
     # We will replace nulls with the mean value of that column
     df_test1_imputed = df_test1.copy()
     df_test1_imputed.fillna(df_test1.mean(), inplace=True)
@@ -89,19 +91,19 @@ def get_features1(df_train, target, df_test):
     df_test2_imputed.fillna(df_test2.mean(), inplace=True)
     print "Divided data into two sets"
 
-    # To see the feature importance, we will drop rows with null values
-    # in the numerical variables in the set 1.
-    # To do that, we fill 'null' in the missing values of category variables first
-    # (which is done already).
+    # =========================================================================
+    # For set 1 for both train and test sets
+    # =========================================================================
     df_train1_dropped_na = df_train1.dropna()
 
-    # For simplicity, we will only consider significant
-    # (and comparably treatable) category variables.
+    # For simplicity, we will only consider significant category variables.
+    # We will deal with train and test sets together in one data frame
     df1 = pd.concat([df_train1_dropped_na, df_test1_imputed])
-    df1_temp = df1[numerical_variables] # Initially it has only numerical variables
+    # Initially it has only numerical variables
+    df1_temp = df1[numerical_variables]
     for ind in category_variables_top10:
-        df_dummy = pd.get_dummies(df1[column_names[ind]], prefix=column_names[ind])
-        #print column_names[ind], df_dummy.shape, df_dummy.isnull().sum().sum()
+        df_dummy = pd.get_dummies(df1[column_names[ind]], \
+                                  prefix=column_names[ind])
         df_dummy.drop(df_dummy.columns[:1], axis=1, inplace=True)
         df1_temp = pd.concat([df1_temp, df_dummy], axis=1)
 
@@ -110,24 +112,12 @@ def get_features1(df_train, target, df_test):
     X1_test = df1_temp.iloc[df_train1_dropped_na.shape[0]:,:].values
     y1 = np.array(target.loc[df_train1_dropped_na.index])
 
-    # Using the random forest to find the feature importances
-    # for numerical variables + 7 category variables.
-    rf1 = RandomForestClassifier(n_estimators=100, oob_score=True)
-    rf1 = rf1.fit(X1, y1)
-
-
-    # Find the sorted important variables and their importances, and look at top 10.
-    indices_important_variables12 = np.argsort(rf12.feature_importances_)[::-1]
-    important_variable_names12 = df1_temp.columns[indices_important_variables12]
-    importances12 = rf12.feature_importances_[indices_important_variables12]
-
-    print "For set1: OOB score:", rf1.oob_score_
-
-    # Trying to predict the test set (only the first set with less nulls).
-    y1_test_prob = rf1.predict_proba(X1_test)[:,1]
-    y1_test_prob = pd.DataFrame(y1_test_prob, index=df_test1.index, \
-                                columns=['PredictedProb'])
-
+    # =========================================================================
+    # For set 2 for both train and test sets
+    # =========================================================================
+    # Find 8 variables (they are the same for both train and test sets)
+    variables_less_null = np.array(numerical_variables)\
+              [np.where(num_nulls_by_column_train < 0.01 * num_data_train)]
 
     df_train2_dropped_na = \
         df_train2[list(variables_less_null) + category_variables_top10].dropna()
@@ -148,5 +138,5 @@ def get_features1(df_train, target, df_test):
     X2_test = df2_temp.iloc[df_train2_dropped_na.shape[0]:,1:].values
     y2 = np.array(target.loc[df_train2_dropped_na.index])
 
-    rf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
-    rf2 = rf2.fit(X2, y2)
+    return [X1, X2], [y1, y2], [X1_test, X2_test], \
+        [df_test1.index, df_test2.index]

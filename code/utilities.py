@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # User defined class for error exception
-class InvalidDiminsionError(Exception):
+class InvalidDimensionError(Exception):
     pass
 
 
@@ -64,10 +64,10 @@ def find_variability(df_train, target, category_variable_name):
     """
     df = pd.concat([df_train[category_variable_name], target], axis=1)
     target_prob_train = target.mean()
-    counts = np,array(pd.value_counts(df[category_variable_name]))
+    counts = np.array(pd.value_counts(df[category_variable_name]))
     ratios = np.array(df.groupby(category_variable_name)[target.name].mean())
 
-    variability = (counts * (ratios[val] - target_prob_train)**2).sum()
+    variability = (counts * (ratios - target_prob_train)**2).sum()
     return variability/df_train.shape[0]
 
 
@@ -131,7 +131,7 @@ def plot_category_variables(df_train, df_test, target, category_variable_names):
     output:
         None (shows plots)
     """
-    num_variables = len(category_variable_names)
+    num_variables_given = len(category_variable_names)
     # Adding target as a column for groupby computations later.
     df_train_category = pd.concat([df_train[category_variable_names], target],\
                                   axis=1)
@@ -142,16 +142,16 @@ def plot_category_variables(df_train, df_test, target, category_variable_names):
     for i, variable_name in enumerate(category_variable_names):
         counts_train = df_train_category.groupby(variable_name).size()
         counts_train.plot(kind='bar', \
-                          ax=axs[0,i] if num_variables > 1 else axs[0], \
+                          ax=axs[0,i] if num_variables_given > 1 else axs[0], \
                           color='b', alpha=0.5)
         counts_test = df_test_category.groupby(variable_name).size()
         counts_test.plot(kind='bar', \
-                         ax=axs[1,i] if num_variables > 1 else axs[1], \
+                         ax=axs[1,i] if num_variables_given > 1 else axs[1], \
                          color='g', alpha=0.5)
         ratios = df_train_category.groupby(variable_name)[target.name]\
             .mean()
-        ratios.plot(kind='bar', ax=axs[2,i] if num_variables > 1 else axs[2], \
-                    color='r', alpha =0.5)
+        ratios.plot(kind='bar', ax=axs[2,i] if num_variables_given > 1 else \
+                    axs[2], color='r', alpha =0.5)
     plt.suptitle('Total Counts and ratios of target 1')
     plt.show()
     return
@@ -224,6 +224,7 @@ def find_category_variables(df_train):
         numerical_variables (list of column indices)
         unique_values (dict of sets)
     """
+    num_variables_given = df_train.shape[1]
     # indices of category variables by looking at types (23 out of 131)
     # Assuming non-category (numerical) variables are in 'float64'
     category_variables = []
@@ -258,11 +259,11 @@ def find_binning_info(df_train, target, \
     output:
         bin info (series): contains the bin label (int) for each value
     """
-    df = pd.concat([df_train[variable_name], target], axis=1)
+    df = pd.concat([df_train[category_variable_name], target], axis=1)
     target_prob_train = target.mean()
-    ratios = df.groupby(variable_name)[target.name].mean()
+    ratios = df.groupby(category_variable_name)[target.name].mean()
     ratio_min = ratios.min()
-    binsize = (ratios.max() - ratios_min)/float(num_bins)
+    binsize = (ratios.max() - ratio_min)/float(num_bins)
     for i in range(-num_bins, num_bins+1):
         pos = target_prob_train + i*binsize + binsize/2.0
         if pos > ratio_min:
