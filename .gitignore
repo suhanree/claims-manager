@@ -3,3 +3,4 @@ code/.ipynb_checkpoints/
 code/.ropeproject/
 code/*.pyc
 code/*.csv
+code/temp*
