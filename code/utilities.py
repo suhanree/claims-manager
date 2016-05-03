@@ -310,7 +310,8 @@ def add_variables_by_binning(variables_binned, num_bins, df_train, target, \
         df_train (data frame): train set
         target (series): target
         df_test (data frame): test set
-        column_names: list of column names for train and test sets
+        column_names: list of column names for train and test sets (will be
+                        modified here)
         unique_values: dict of sets of unique values (key: column index)
     output:
         none
