@@ -74,9 +74,11 @@ All I did was dealing with category features with too many data.
 ## Analysis
 Based on the 2-set approach mentioned above, I applied several ML algorithms:
 logistic regression, random forest, and gradient boosted trees.
-And performed grid search to find the best set of model parameters using 
-5-fold cross validation on an EC2 instance.
-As expected, gradient boosted trees performed best.
+And performed grid search to find the optimal set of model parameters using 
+5-fold cross validation on an EC2 instance, minimizing the log loss function.
+As expected, gradient boosted trees performed best, and optimal parameters were
+*learning_rate*=0.05, *n_estimators*=378 & 240, *max_depth*=6, *min_child_weight*=3,
+*gamma*=0, *subsample*=0.9, *colsample_bytree*=0.9, and *reg_lambda*=0.05.
 My best score in the public leaderboard was 0.46505, while the winning score
 was 0.42233.
 I used mostly python sklearn libraries, but for gradient boosted trees, the xgboost
